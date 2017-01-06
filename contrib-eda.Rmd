@@ -1,0 +1,691 @@
+Ohio Presidential Campaign Contribution Analysis by Siddharth Kumar
+========================================================
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using
+# in your analysis in this code chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk.
+# This prevents the code from displaying in the knitted HTML output.
+# You should set echo=FALSE for all code chunks in your file.
+
+library(ggplot2)
+```
+
+```{r echo=F, message=F, warning=F, Load_the_Data}
+# Load the Data
+oh <- read.csv('oh-contributions-with-ids.csv', stringsAsFactors = FALSE)
+```
+
+# Univariate Plots Section
+```{r echo=F, message=F, error=F}
+summary(oh)
+str(oh)
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(cand_nm), data = oh) + 
+  geom_histogram(stat = 'count') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Hillary Clinton, Bernie Sanders, and Donald Trump received the most contributions of any candidate.
+
+```{r echo=F, message=F, warning=F}
+cand <- read.csv('cn.txt', sep='|', quote = "", stringsAsFactors = FALSE)
+```
+
+```{r warning=FALSE, echo=FALSE, message=FALSE}
+library(dplyr)
+oh <- left_join(oh, subset(cand, select = c(CAND_ID, CAND_PTY_AFFILIATION)),
+                 by = c("cand_id" = "CAND_ID"))
+```
+
+```{r echo=F, message=F, warning=F}
+oh$CAND_PTY_AFFILIATION[!oh$CAND_PTY_AFFILIATION %in% c('DEM', 'REP')] <- 'OTHER'
+oh$CAND_PTY_AFFILIATION <- factor(oh$CAND_PTY_AFFILIATION, levels = c('DEM', 'REP', 'OTHER'))
+```
+
+```{r echo=F, message=F, warning=F}
+oh$CAND_PTY_AFFILIATION <- factor(oh$CAND_PTY_AFFILIATION)
+oh$cand_nm <- factor(oh$cand_nm)
+oh$contbr_occupation <- factor(oh$contbr_occupation)
+oh$cand_id <- factor(oh$cand_id)
+oh$cmte_id <- factor(oh$cmte_id)
+oh$election_tp <- factor(oh$election_tp)
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(CAND_PTY_AFFILIATION), data = oh) +
+  geom_histogram(stat = 'count')
+```
+
+Democrats received the most contributions.
+
+```{r echo=F, message=F, warning=F}
+oh$election_tp <- factor(oh$election_tp, levels = c('P2016', 'G2016'))
+ggplot(aes(election_tp),
+       data = subset(oh, !is.na(election_tp))) +
+  geom_bar()
+```
+
+There were more contributions in the primaries than the general election. This makes sense because the primaries have more candidates and take place over a longer time period.
+
+```{r echo=FALSE, message=F, warning=F}
+ggplot(aes(contb_receipt_amt), data = oh) +
+  geom_histogram()
+
+summary(oh$contb_receipt_amt)
+```
+
+This histogram doesn't tell me much. From first glance, it seems the large majority of people contributed just \$0. This is because this data has huge outliers, most notably the maximum contribution at \$29,100. Also, there seem to be a sizeable amount of negative contributions with a minimum at -\$10,800. I will log transform this data and remove negative values to get a better look at campaign contributions.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contb_receipt_amt), data = subset(oh, contb_receipt_amt > 0)) +
+  geom_histogram(bins = 45) +
+  scale_x_log10()
+```
+
+This plot reveals that most people contributed in the \$1 - \$100 range. But a significant amount of people also contributed thousands of dollars as well.
+
+```{r echo=F, message=F, warning=F}
+oh$contb_receipt_dt <- as.Date(oh$contb_receipt_dt, format='%d-%b-%y')
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contb_receipt_dt), data = oh) +
+  geom_histogram()
+
+summary(oh$contb_receipt_dt)
+```
+
+Although contributions began as early as July 2014, they really began to take off in mid 2015. I'll zoom into the distribution by removing all contributions before June 2015.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contb_receipt_dt), 
+       data = subset(oh, contb_receipt_dt > '2015-06-01' & election_tp != '')) +
+  geom_histogram(bins = 75) +
+  scale_x_date(date_breaks = '1 month') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+  
+```
+
+I see three distinct peaks when contribution counts were the highest in April, July, and November of 2016. 
+
+```{r echo=F, message=F, warning=F}
+unwanted_occupations <- c('INFORMATION REQUESTED', 'INFORMATION REQUESTED PER BEST EFFORTS', '')
+ggplot(aes(contbr_occupation),
+       data = subset(oh, !contbr_occupation %in% unwanted_occupations) %>%
+         group_by(contbr_occupation) %>%
+         filter(n() > 1000)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Since there were over 6,000 occupations listed in the dataset, I subsetted the data to only include occupations with atleast 1,000 contributions. Most contributions came from those who are retired and not employed, with significant contributions coming from attorneys, homemakers, physicians, professors, and teachers.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contbr_city),
+       data = oh %>%
+         group_by(contbr_city) %>%
+         filter(n() > 800)) +
+  geom_histogram(stat = 'count') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+This plot shows that Columbus and Cincinnati had the most contributions of any city, each with more than 15,000. Cleveland had the next highest with just over 5,000.
+
+In addition to city, I'd like to see how contributions varied between congressional districts.
+
+```{r echo=F, message=F, warning=F}
+elec_results <- read.csv('election_results_by_district.csv', stringsAsFactors = FALSE)
+elec_results <- subset(elec_results, select = c(CD, Obama.2012, Romney.2012, Clinton.2016, Trump.2016))
+elec_results <- subset(elec_results, startsWith(elec_results$CD, 'OH'))
+```
+
+```{r}
+find_winner <- function(dem, rep) {
+  result <- ''
+  if (dem > rep) {
+    result <- 'DEM'
+  } else {
+    result <- 'REP'
+  }
+  return(result)
+}
+
+remove_state_from_cd <- function(cd) {
+  return(as.numeric(gsub('OH-', '', cd)))
+}
+
+get_five_digit_zip <- function(zip) {
+  return(as.numeric(substr(zip, 1, 5)))
+}
+```
+
+```{r}
+elec_results$CD <- sapply(elec_results$CD, remove_state_from_cd)
+elec_results$CD <- factor(elec_results$CD)
+elec_results$winner_2012 <- mapply(find_winner, elec_results$Obama.2012, elec_results$Romney.2012)
+elec_results$winner_2016 <- mapply(find_winner, elec_results$Clinton.2016, elec_results$Trump.2016)
+oh$contbr_zip <- sapply(oh$contbr_zip, get_five_digit_zip)
+```
+
+
+```{r echo=F, message=F, warning=F}
+districts_by_zip <- read.csv('districts-by-zip.csv')
+districts_by_zip <- subset(districts_by_zip, !duplicated(districts_by_zip$ZCTA))
+```
+
+```{r echo=F, message=F, warning=F}
+oh <- left_join(oh, subset(districts_by_zip, select = c(ZCTA, CongressionalDistrict)),
+                by = c("contbr_zip" = "ZCTA"))
+
+oh$CongressionalDistrict <- factor(oh$CongressionalDistrict)
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(CongressionalDistrict),
+       data = subset(oh, !is.na(CongressionalDistrict))) +
+  geom_bar()
+```
+
+Most contributions came from the 1st, 3rd, and 11th districts -- which happen to be where the 3 biggest cities are located: Cincinnati, Columbus, and Cleveland respectively. 
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+This dataset has 164,475 observations of 19 variables. It includes campaign contribution information for 24 candidates in the 2016 primary and general elections. I imported another dataset to include candidate party affiliation. That variable has 3 values of 'DEM', 'REP', and 'OTHER'.
+
+Notable observations:
+<ul>
+  <li> Most contributions came from Democrats </li>
+  <li> Most contributions were in the primaries </li>
+  <li> Most people contributed in the \$1 - \$100 range </li>
+  <li> Most contributions came in July and November of 2016 </li>
+  <li> Columbus and Cincinnati contributed the most of any other city </li>
+  <li> Most contributions came from retirees and the unemployed </li>
+</ul>
+
+### What is/are the main feature(s) of interest in your dataset?
+The main features I'd like to study are number of contributors, contribution amount and countributor location (city/zip code/congressional district). I'd like to facet this data on candidate party affiliation to see how contributions for different parties varied in different congressional districts.
+### What other features in the dataset do you think will help support your investigation into your feature(s) of interest?
+Other interesting features are contribution date and contributor occupation. I'd also like to facet this data on candidate party affiliation to compare contributors based on their political leaning.
+
+### Did you create any new variables from existing variables in the dataset?
+I imported a dataset from fec.gov that included candidate party affiliations for all candidates. I also imported a datset to map zip codes to congressional districts from census.gov and used that to map contribution data to election results data by congressional district. The results data is from dailykos.com.
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+The candidate party affiliation data originally included parties such as 'Independent', 'Green', and 'Libertarian'. Since there were so few contributions in those parties, I combined them into an 'Other' field. I also log transformed the contributor amount data to get a better look at the long tail distribution.
+
+# Bivariate Plots Section
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contb_receipt_amt, color = CAND_PTY_AFFILIATION),
+       data = subset(oh, contb_receipt_amt > 0)) +
+  geom_freqpoly(bins = 100) +
+  scale_x_log10() +
+  scale_color_manual(values = c('blue', 'red','green'))
+```
+
+From this plot, it seems Democrats contributed more in the \$1 - \$100 range, while Republicans outspent Democrats in the \$1000 + range. I'll zoom in to confirm my suspicions.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contb_receipt_amt, color = CAND_PTY_AFFILIATION),
+       data = subset(oh, contb_receipt_amt > 1000 & CAND_PTY_AFFILIATION != 'OTHER')) +
+  geom_freqpoly(bins = 20) +
+  scale_x_log10(breaks = scales::trans_breaks("log10", function(x) 10^x)) +
+  scale_color_manual(values = c('blue', 'red','green'))
+```
+
+Republicans contributed more than Democrats in ranges over \$1,000. There were even some contributions in the \$10,000 - \$30,000 range.
+
+I'm curious how contribution amounts varied between candidates.
+
+```{r echo=F, message=F, warning=F}
+contbr_by_cand <- subset(oh, contb_receipt_amt > 0) %>%
+  group_by(cand_nm, CAND_PTY_AFFILIATION) %>%
+  summarise(total_contbr = sum(contb_receipt_amt),
+            mean_contbr = mean(contb_receipt_amt),
+            median_contbr = median(contb_receipt_amt),
+            max_contbr = max(contb_receipt_amt)) %>%
+  arrange(CAND_PTY_AFFILIATION)
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = cand_nm, y = mean_contbr), data = contbr_by_cand) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+This plot is surprising because several candidates that raised comparatively less money than others, had much higher mean contributions. Examples of these candidates are Jeb Bush, Lindsey Graham, Martin O'Malley, and George Pataki. I assume these candidates received fewer, but higher contribution amounts.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = cand_nm, y = median_contbr), data = contbr_by_cand) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Looking at the median contribution amount data, candidates who had high mean contributions like Jeb Bush and Lindsey Graham are no longer as prominent. This is most likely because these candidates had large outlier contributions that skewed the mean. However Martin O'Malley and George Pataki still have the highest medians, meaning they probably had less outliers. I'll investigate outliers in contribution amounts using box plots.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = cand_nm, y = contb_receipt_amt),
+       data = subset(oh, contb_receipt_amt > 0) %>%
+         group_by(cand_nm) %>%
+         filter(sum(contb_receipt_amt) > 15000)) +
+  geom_boxplot() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+This plot indicates that John Kasich had massive outliers in contribution amounts. This explains why his mean contribution amount was much higher than his median amount. I want to see how candidates compared with each other more closely, so I'll remove outliers and zoom in.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = cand_nm, y = contb_receipt_amt),
+       data = subset(oh, contb_receipt_amt > 0 & CAND_PTY_AFFILIATION != 'OTHER') %>%
+         group_by(cand_nm) %>%
+         filter(sum(contb_receipt_amt) > 15000)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(y = c(0, 500)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Removing the outliers and faceting the data on party affiliation, I find that most candidates had modest donations less than \$200. However candidates like Jeb Bush and John Kasich received very large donations that skewed the interquartile range.
+
+Next I want to see how contributions varied between political party.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = CAND_PTY_AFFILIATION, y = contb_receipt_amt),
+       data = subset(oh, contb_receipt_amt > 0 & CAND_PTY_AFFILIATION != 'OTHER')) +
+  geom_boxplot() +
+  coord_cartesian(y = c(0, 200))
+```
+
+According to this boxplot, the median Republican contribution was roughly double the median Democratic donation. Republican contribution amounts also spanned an interquartile range that was double than the Democratic interquartile range.
+
+```{r echo=FALSE, warning=FALSE, message=FALSE}
+library(dplyr)
+contbr_by_cand <- subset(oh, contb_receipt_amt > 0 & !is.na(election_tp)) %>%
+  group_by(cand_nm, election_tp) %>%
+  summarise(total_contbr = sum(contb_receipt_amt),
+            mean_contbr = mean(contb_receipt_amt),
+            median_contbr = median(contb_receipt_amt),
+            max_contbr = max(contb_receipt_amt))
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = cand_nm, y = total_contbr), data = contbr_by_cand) +
+  geom_bar(stat = 'identity') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Here I see that Clinton, Kasich, and Trump received the most money in contributions. I wonder if Clinton and Trump had a higher total contribution amount because they ran in both primary and general elections. I'll study this later in the analysis. First, I'll compare counts between candidates in both the primary and general elections.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(cand_nm),
+       data = subset(oh, !is.na(election_tp)) %>%
+         group_by(cand_nm) %>%
+         filter(n() > 2500)) +
+  geom_histogram(stat = 'count') +
+  facet_wrap(~ election_tp, scales = 'free_x') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+This plot affirms my belief that Clinton and Trump were able to raise more money because they had more opportunities in both elections. Looking at just the primaries, Bernie Sanders had the most contributors of any candidate.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(election_tp, fill = CAND_PTY_AFFILIATION),
+       data = subset(oh, !is.na(election_tp))) +
+  geom_bar(position = 'dodge') +
+  scale_fill_manual(values = c('blue', 'red', 'green'))
+```
+
+More Democrats contributed than Republicans in both elections, especially the general election. I wonder how contributions varied over time.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contb_receipt_dt, color = CAND_PTY_AFFILIATION), 
+       data = subset(oh, contb_receipt_dt > '2015-06-01')) +
+  geom_freqpoly(bins = 75) +
+  geom_vline(xintercept = as.numeric(as.Date('2016-07-26'))) +
+  scale_color_manual(values = c('blue', 'red', 'green'))
+```
+
+In the beginning Republican contributions outweighed Democratic ones up until early January. From then on, Democrats contributions were much greater until July 2016, when Republican contributions skyrocketed. Afterward, Democrats overtook Republicans again, with counts over 7,000 compared to Republican counts barely reaching 500. The black vertical line represents the date that both candidates officially announced their candidacy in the general election.
+
+Next I want to analyze how contribution amounts varied over time.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = contb_receipt_dt, y = contb_receipt_amt),
+       data = subset(oh, contb_receipt_amt > 1)) +
+  geom_point(alpha = 1/10) +
+  geom_smooth() +
+  scale_y_log10()
+```
+
+Although the smoother indicates that contribution amounts decreased over time, it's hard to get a good idea of what the relationship between contribution amount and date are. Since most contributions are below \$100, I'll subset the data to only include those contributions to see if theres a clear relationship.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = contb_receipt_dt, y = contb_receipt_amt),
+       data = subset(oh, contb_receipt_amt <= 100 & contb_receipt_amt > 0)) +
+  geom_point(alpha = 1/25) +
+  geom_smooth() +
+  scale_x_date(date_breaks = '1 month') +
+  coord_cartesian(x = c(as.Date('2015-05-01'), as.Date('2016-11-15'))) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+I trust this smoother more than the previous since the data here is more representative of the total population's contributions. It indicates that while there was some fluctation, contribution amount slightly decreased over time.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contbr_occupation, fill = CAND_PTY_AFFILIATION),
+       data = subset(oh, !contbr_occupation %in% unwanted_occupations) %>%
+         group_by(contbr_occupation) %>%
+         filter(n() > 1000)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c('blue', 'red', 'green'))
+```
+
+I find that occupations like 'Not employed', 'Professor', and 'Teacher' had more Democrats contribute while 'Owner' and 'President' were predominately Republican.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = contbr_occupation, y = contb_receipt_amt),
+       data = subset(oh, contb_receipt_amt > 0 & !contbr_occupation %in% unwanted_occupations) %>%
+         group_by(contbr_occupation) %>%
+         filter(n() > 1000)) +
+  geom_boxplot() +
+  coord_cartesian(y = c(0, 500)) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+Owner and President had the highest median contribution, while manager, professor and teacher had the lowest.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(contbr_city, fill = CAND_PTY_AFFILIATION),
+       data = oh %>%
+         group_by(contbr_city) %>%
+         filter(n() > 800)) +
+  geom_bar() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  scale_fill_manual(values = c('blue', 'red', 'green'))
+```
+
+From this plot I see that democratic contributions outweighed republicans in every city with atleast 800 contributions, except for Beavercreek, Loveland, and Mansfield.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(CongressionalDistrict, fill = CAND_PTY_AFFILIATION),
+       data = subset(oh, !is.na(CongressionalDistrict) & CAND_PTY_AFFILIATION != 'OTHER')) +
+  geom_bar(position = 'dodge') +
+  scale_fill_manual(values = c('blue', 'red'))
+```
+
+Democrats out-contributed Republicans in most districts, but especially the 3rd, 9th, 11th, and 13th. I wonder if this had any bearing on the winner of these districts in the general election.
+
+Next I'd like to analyze contribution amounts per congressional district.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = CongressionalDistrict, y = contb_receipt_amt),
+       data = subset(oh, !is.na(CongressionalDistrict) & contb_receipt_amt > 0)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(y = c(0, 100))
+```
+
+The highest median contributions came from districts 6, 11, and 16. I'll make this plot again by grouping on winning party, to see how districts where the Democratic candidate won compare to districts where the Republican candidate won.
+
+```{r echo=F, message=F, warning=F}
+oh <- left_join(oh, subset(elec_results, select = c(CD, winner_2016)),
+          by = c("CongressionalDistrict" = "CD"))
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = winner_2016, y = contb_receipt_amt),
+       data = subset(oh, !is.na(CongressionalDistrict) &
+                       contb_receipt_amt > 0 & CAND_PTY_AFFILIATION != 'OTHER') %>%
+         group_by(winner_2016)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(y = c(0, 100))
+```
+
+Contributions in Republican won districts were slightly higher than contributions in Democrat won districts.
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. How did the feature(s) of interest vary with other features in the dataset?
+I observed the relationships between contribution counts and amounts between several categorical variables-- candidate, political party, contributor location (city, congressional district). I also compared contribution counts by political party and election type.
+<ul>
+  <li> Less popular candidates like Lindsey Graham, John Kasich, and Scott Walker had the highest median contribution amounts. </li>
+  <li> Bernie Sanders had the most contributions in the primaries </li>
+  <li> When looking at contribution counts across all congressional districts, I found that the districts that had significantly more Democrat than Republican contributions, ended up being won by the Democratic candidate. </li>
+  <li> Hillary Clinton received more contributions than Donald Trump in every congressional district </li>
+  <li> Republican median contribution amounts were twice as much as Democrat median contribution amounts </li>
+</ul>
+  
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+The other categorical variables I observed were contributor occupation and contribution date. 
+<ul>
+  <li> Teachers, professors, and the unemployed contributed mostly to Democrats, while owners and presidents contributed mostly to Republicans. </li>
+  <li> Contributors with the occupation 'president' had the highest median contribution -- almost \$200.
+  <li> Contribution amount slightly decreased over time </li>
+  <li> Republican contributions spiked on July 8, 2016 and Democrat contributions spiked on November 3, 2016. </li>
+</ul> 
+
+### What was the strongest relationship you found?
+Republicans median contribution amounts were twice as much as Democrat median contribution amounts. From this, I wonder if it's safe to assume that Republicans generally donate more than Democrats. This was also evident in the occupation data, as jobs like 'president' and 'owner' had the highest median contributions, and mostly consisted of Republican contributors. On the other hand, jobs like 'teacher' and 'professor' were among the lowest contributors, and mostly consisted of Democrats.
+
+# Multivariate Plots Section
+
+Previously, I compared contribution counts between candidates in both the primary and general elections. Now I will compare contribution amounts.
+```{r echo=F, message=F, warning=F}
+contbr_by_cand_by_election_tp <- subset(oh, contb_receipt_amt > 0) %>%
+  group_by(cand_nm, CAND_PTY_AFFILIATION, election_tp) %>%
+  summarise(total_contbr = sum(contb_receipt_amt),
+            mean_contbr = mean(contb_receipt_amt),
+            median_contbr = median(contb_receipt_amt),
+            max_contbr = max(contb_receipt_amt)) %>%
+  arrange(CAND_PTY_AFFILIATION)
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = cand_nm, y = total_contbr),
+       data = subset(contbr_by_cand_by_election_tp,
+                     election_tp != '' & total_contbr > 15000)) +
+  geom_bar(stat = 'identity') +
+  facet_wrap(~ election_tp, scales = 'free_x') +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+The two main candidates -- Clinton and Trump -- received the most contributions in the general election. Kasich, Cruz and Rubio still received contributions even after they lost in the primaries. It's important to note that I subset the data to only include candidates that received atleast \$15,000 in total contributions.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = election_tp, y = total_contbr, fill = CAND_PTY_AFFILIATION),
+       data = subset(oh, !is.na(election_tp) & CAND_PTY_AFFILIATION != 'OTHER') %>%
+         group_by(CAND_PTY_AFFILIATION, election_tp) %>%
+         summarise(total_contbr = sum(contb_receipt_amt))) +
+  geom_bar(stat = 'identity', position = 'dodge') +
+  scale_fill_manual(values = c('blue', 'red', 'green'))
+```
+
+The total Republican contribution was higher than the total Democrat contribution in the primaries. However, the total Democrat contribution was higher than the Republicans in the general election.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(CongressionalDistrict, fill = CAND_PTY_AFFILIATION),
+       data = subset(oh, !is.na(CongressionalDistrict) & CAND_PTY_AFFILIATION != 'OTHER')) +
+  geom_bar(position = 'dodge') +
+  facet_wrap(~winner_2016, scales = 'free_x', ncol = 1) +
+  scale_fill_manual(values = c('blue', 'red'))
+```
+
+Here, I faceted the data on the party who won each district in the general election. The first plot represents districts where the Democratic candidate won, and the second plot represents districts where the Republican candidate won. I noticed before that Democrats especially out-contributed Republicans in the 3rd, 9th, 11th, and 13th districts -- these happen to be the same districts where the Democratic candidate won.
+
+One problem with this plot is that it shows contributions by party. Since the election is really just between two people, it's not realistic to say that supporters of candidates who didn't win their primaries, will still vote along party lines (eg. Supporters of Bernie Sanders will not necessarily vote for Hillary Clinton). Therefore, I will make this plot again with contributions for just the two presidential nominees (Hillary Clinton and Donald Trump).
+
+
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(CongressionalDistrict, fill = cand_nm),
+       data = subset(oh, !is.na(CongressionalDistrict) & CAND_PTY_AFFILIATION != 'OTHER'
+                     & cand_nm %in% c('Clinton, Hillary Rodham', 'Trump, Donald J.'))) +
+  geom_bar(position = 'dodge') +
+  facet_wrap(~ winner_2016, scales = 'free_x', ncol = 1) +
+  scale_fill_manual(values = c('blue', 'red'))
+```
+
+I was not expecting this, as now it shows that Hillary Clinton received significantly more contributions than Donald Trump, even in districts that Trump won. This means that Ohio Republican contributors were also contributing significantly toward other candidate(s).
+
+```{r echo=F, message=F, warning=F}
+contbr_amt_by_dist <- subset(oh, contb_receipt_amt > 0 & !is.na(CongressionalDistrict) &
+                               CAND_PTY_AFFILIATION != 'OTHER') %>%
+  group_by(CongressionalDistrict, winner_2016, CAND_PTY_AFFILIATION) %>%
+  summarise(total_contbr = sum(contb_receipt_amt),
+            mean_contbr = mean(contb_receipt_amt),
+            median_contbr = median(contb_receipt_amt),
+            max_contbr = max(contb_receipt_amt))
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = CongressionalDistrict, y = total_contbr, fill = CAND_PTY_AFFILIATION),
+       data = contbr_amt_by_dist) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  facet_wrap(~ winner_2016, scales = 'free_x', ncol = 1) +
+  scale_fill_manual(values = c('blue', 'red'))
+```
+
+Republicans contributed more money in nearly every district, with the exceptions being the 3rd, 9th, and 11th -- which happen to be all districts where the Democratic candidate won. As I did previously, I'll subset this data to only include the presidential nominees, Hillary Clinton and Donald Trump.
+
+```{r echo=F, message=F, warning=F}
+contbr_amt_by_dist_and_cand <- subset(oh, contb_receipt_amt > 0 & !is.na(CongressionalDistrict) &
+                               CAND_PTY_AFFILIATION != 'OTHER') %>%
+  group_by(CongressionalDistrict, winner_2016, cand_nm) %>%
+  summarise(total_contbr = sum(contb_receipt_amt),
+            mean_contbr = mean(contb_receipt_amt),
+            median_contbr = median(contb_receipt_amt),
+            max_contbr = max(contb_receipt_amt))
+```
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = CongressionalDistrict, y = total_contbr, fill = cand_nm),
+       data = subset(contbr_amt_by_dist_and_cand, cand_nm %in% c('Clinton, Hillary Rodham', 'Trump, Donald J.'))) +
+  geom_bar(position = 'dodge', stat = 'identity') +
+  facet_wrap(~ winner_2016, scales = 'free_x', ncol = 1) +
+  scale_fill_manual(values = c('blue', 'red'))
+```
+
+Hillary Clinton raised more money than Donald Trump in 11 out of 16 districts.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = contbr_occupation, y = contb_receipt_amt, color = CAND_PTY_AFFILIATION),
+       data = subset(oh, contb_receipt_amt > 0 & !contbr_occupation %in% unwanted_occupations
+                     & CAND_PTY_AFFILIATION != 'OTHER') %>%
+         group_by(contbr_occupation) %>%
+         filter(n() > 1000)) +
+  geom_boxplot(outlier.shape = NA) +
+  coord_cartesian(y = c(0, 500)) +
+  scale_color_manual(values = c('blue', 'red')) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+The median Republican contribution was higher than the median Democrat contribution for all occupations that had atleast 1,000 contributions.
+
+```{r echo=F, message=F, warning=F}
+ggplot(aes(x = contb_receipt_dt, y = contb_receipt_amt,
+           color = CAND_PTY_AFFILIATION), 
+       data = subset(oh, contb_receipt_dt > '2015-06-01' &
+                       contb_receipt_amt > 0 &
+                       CAND_PTY_AFFILIATION != 'OTHER')) +
+  geom_point(alpha = 1/500) +
+  coord_cartesian(y = c(0, 700)) +
+  geom_smooth() +
+  geom_vline(xintercept = as.numeric(as.Date('2016-07-26'))) +
+  scale_color_manual(values = c('blue', 'red', 'green'))
+```
+
+Republican contribution amounts were consistently higher than Democratic amounts, except for a short period of time in late June / early July of 2016. Both parties contribution amounts trended downward until July 2016. However, Republican contributions significantly increased shortly after Donald Trump was announced as the Republican nominee.
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. Were there features that strengthened each other in terms of looking at your feature(s) of interest?
+
+<ul>
+  <li> Republicans contributed significantly more than Democrats in the primaries, however Democrats contributed more money in the general election </li>
+  <li> Hillary Clinton had more contributions than Donald Trump in all congressional districts, and raised more than him in 11 districts </li>
+  <li> When comparing Republican and Democratic contributions across professions, Republicans had a higher median contribution than Democrats for all professions that had atleast 1,000 contributions. </li>
+  <li> Republicans generally gave more money per contribution over time. </li>
+</ul>
+
+Many of these plots affirmed a suspicion that Republicans were generally more generous in their campaign contributions.
+
+### Were there any interesting or surprising interactions between features?
+
+Hillary Clinton raised more money than Donald Trump in 11 out of 16 districts. This surprised me because Republicans as a whole nearly outraised Democrats in all districts. This tells me that Donald Trump probably wasn't the most popular Republican candidate in Ohio.
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+```{r echo=FALSE, Plot_One}
+
+ggplot(aes(contb_receipt_dt, color = CAND_PTY_AFFILIATION), 
+       data = subset(oh, contb_receipt_dt > '2015-06-01')) +
+  geom_freqpoly(bins = 75) +
+  geom_vline(xintercept = as.numeric(as.Date('2016-07-26'))) +
+  scale_color_manual(values = c('blue', 'red', 'green')) +
+  labs(title = 'Contribution Count Over Time',
+       x = 'Contribution Date', y = 'Count',
+       color = 'Candidate Party Affiliation') +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Description One
+
+In the beginning Republican contributions outweighed Democratic ones up until early January. From then on, Democrats contribution counts were much greater until July 2016, when Republican contributions skyrocketed. Afterward, Democrats overtook Republicans again, with counts over 7,000. The black vertical line represents the date that both candidates officially announced their candidacy in the general election. 
+
+I was curious as to what might have caused the Republican spike on July 9th 2016, and the Democratic spike on November 4th 2016. With Google, I found that the biggest news stories around these times were the Dallas police shooting and James Comey announcing his investigation on Hillary Clinton's emails, respectively.
+
+### Plot Two
+```{r echo=FALSE, Plot_Two}
+
+ggplot(aes(contb_receipt_amt, color = CAND_PTY_AFFILIATION),
+       data = subset(oh, contb_receipt_amt > 0 & CAND_PTY_AFFILIATION != 'OTHER')) +
+  geom_freqpoly(bins = 50) +
+  scale_x_log10() +
+  scale_color_manual(values = c('blue', 'red','green')) +
+  labs(title = 'Distribution of Contribution Amounts',
+       x = 'Contribution Amount', y = 'Count',
+       color = 'Candidate Party Affiliation') +
+  theme(plot.title = element_text(hjust = 0.5))
+
+```
+
+### Description Two
+
+Democrats contributed more in the \$1 - \$100 range, while Republicans outspent Democrats in the \$1000 + range. This plot is log transformed on the y-axis because it was originally a very long tailed distribution. After transforming, the Democratic distribution looks more normal than the Republican distribution. Republicans had less donations under \$30 than Democrats, but more donations over \$100.
+
+
+### Plot Three
+```{r echo=FALSE, Plot_Three}
+ggplot(aes(CongressionalDistrict, fill = cand_nm),
+       data = subset(oh, !is.na(CongressionalDistrict) & CAND_PTY_AFFILIATION != 'OTHER'
+                     & cand_nm %in% c('Clinton, Hillary Rodham', 'Trump, Donald J.'))) +
+  geom_bar(position = 'dodge') +
+  facet_wrap(~ winner_2016, scales = 'free_x', ncol = 1) +
+  scale_fill_manual(values = c('blue', 'red')) +
+  labs(title = 'Contribution Counts per Congressional District',
+       x = 'Congressional District', y = 'Count',
+       color = 'Candidate Party Affiliation') +
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+### Description Three
+
+Hillary Clinton received significantly more contributions than Donald Trump in all congressional districts. This surprised me because Clinton looks to be much more popular than Donald Trump according to this plot. This didn't seem to have an impact on voting patterns because Trump ended up winning Ohio anyway.
+
+------
+
+# Reflection
+
+In my analysis, I was very interested in how contributions varied between Republicans and Democrats across different variables. I found the most interesting comparisons when analyzing contribution amount and contribution location. It was surprising to see how Republicans consistently contributed more money than Democrats. I saw this when faceting contribution amounts on occupation and congressional district, and when plotting them over time. Although political affiliation was a major component of this analysis, it wasn't originally included in the dataset. This proved to be a minor difficulty, as I had to find a supplemental dataset that included this information. Luckily, I was able to find a "Candidate Master File" on fec.gov, that merged with my dataset flawlessly. A much bigger challenge was finding election results per congressional district. I wanted to have this data in order to compare contributions per congressional district based on the political party that won that district. Most Google searches did not return what I was looking for (atleast for free), since the election was so recent. The best source I found was dailykos.com, which was collecting this data from each congressional district from all states. I was able to confirm the validity of this data from the Associated Press. 
+
+A limitation of this analysis is that it doesn't include vote counts to compare contributions to. Had I been able to include this, I would've been able to get a better idea of how contribution counts and amounts correlate to vote counts. This is something that I would like to include to investigate this data further. Another way to expand this analysis would be to include contributions from previous elections, and study how trends change.
+
+
