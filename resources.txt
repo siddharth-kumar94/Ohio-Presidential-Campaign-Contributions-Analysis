@@ -1,3 +1,3 @@
 Candidate Master File -- cn.txt -- http://www.fec.gov/finance/disclosure/metadata/DataDictionaryCandidateMaster.shtml
 Zip code to Congressional District Map -- districts-by-zip.csv -- https://www.census.gov/geo/maps-data/data/cd_state.html
-2016 Election Results by Congressional District -- election_results_by_district -- http://www.dailykos.com/story/2012/11/19/1163009/-Daily-Kos-Elections-presidential-results-by-congressional-district-for-the-2012-2008-elections
+2016 Election Results by Congressional District -- election_results_by_district.csv -- http://www.dailykos.com/story/2012/11/19/1163009/-Daily-Kos-Elections-presidential-results-by-congressional-district-for-the-2012-2008-elections
